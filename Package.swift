@@ -16,7 +16,7 @@ let package = Package(
         ),
     ],
     dependencies:[
-        .package(path: "localPackages/Tor"),
+        .package(path: "localPackages/Arti"),
         .package(path: "localPackages/BitLogger"),
         .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.21.1")
     ],
@@ -26,7 +26,7 @@ let package = Package(
             dependencies: [
                 .product(name: "P256K", package: "swift-secp256k1"),
                 .product(name: "BitLogger", package: "BitLogger"),
-                .product(name: "Tor", package: "Tor")
+                .product(name: "Tor", package: "Arti")
             ],
             path: "bitchat",
             exclude: [
@@ -34,7 +34,8 @@ let package = Package(
                 "Assets.xcassets",
                 "bitchat.entitlements",
                 "bitchat-macOS.entitlements",
-                "LaunchScreen.storyboard"
+                "LaunchScreen.storyboard",
+                "ViewModels/Extensions/README.md"
             ],
             resources: [
                 .process("Localizable.xcstrings")
@@ -49,7 +50,8 @@ let package = Package(
                 "README.md"
             ],
             resources: [
-                .process("Localization")
+                .process("Localization"),
+                .process("Noise")
             ]
         )
     ]

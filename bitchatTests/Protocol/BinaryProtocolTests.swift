@@ -55,6 +55,8 @@ struct BinaryProtocolTests {
         #expect(decodedPacket.signature == TestConstants.testSignature)
     }
 
+    // MARK: - Source-Based Routing Tests (v2 only)
+    
     @Test func packetWithRouteRoundTrip() throws {
         let route: [Data] = [
             try #require(Data(hexString: "0102030405060708")),
@@ -62,6 +64,7 @@ struct BinaryProtocolTests {
             try #require(Data(hexString: "2122232425262728"))
         ]
 
+        // Route is only supported for v2+ packets
         var packet = BitchatPacket(
             type: 0x01,
             senderID: route[0],
@@ -69,7 +72,8 @@ struct BinaryProtocolTests {
             timestamp: 1_720_000_000_000,
             payload: Data("route-test".utf8),
             signature: nil,
-            ttl: 6
+            ttl: 6,
+            version: 2
         )
         packet.route = route
 
@@ -78,6 +82,7 @@ struct BinaryProtocolTests {
         #expect((flagsByte & BinaryProtocol.Flags.hasRoute) != 0)
 
         let decoded = try #require(BinaryProtocol.decode(encoded), "Failed to decode packet with route")
+        #expect(decoded.version == 2)
         let decodedRoute = try #require(decoded.route)
         #expect(decodedRoute.count == route.count)
         for (expected, actual) in zip(route, decodedRoute) {
@@ -90,6 +95,7 @@ struct BinaryProtocolTests {
         let destination = try #require(Data(hexString: "8899aabbccddeeff"))
         let shortHop = Data([0xAA, 0xBB, 0xCC])
 
+        // Route is only supported for v2+ packets
         var packet = BitchatPacket(
             type: 0x02,
             senderID: sender,
@@ -97,7 +103,8 @@ struct BinaryProtocolTests {
             timestamp: 1_730_000_000_000,
             payload: Data("pad-test".utf8),
             signature: nil,
-            ttl: 5
+            ttl: 5,
+            version: 2
         )
         packet.route = [shortHop, destination]
 
@@ -117,6 +124,7 @@ struct BinaryProtocolTests {
             try #require(Data(hexString: "0202020202020202"))
         ]
         let repeatedString = String(repeating: "compress-me", count: 150)
+        // Route is only supported for v2+ packets
         var packet = BitchatPacket(
             type: 0x03,
             senderID: route[0],
@@ -124,7 +132,8 @@ struct BinaryProtocolTests {
             timestamp: 1_740_000_000_000,
             payload: Data(repeatedString.utf8),
             signature: nil,
-            ttl: 7
+            ttl: 7,
+            version: 2
         )
         packet.route = route
 
@@ -133,6 +142,146 @@ struct BinaryProtocolTests {
         #expect(decoded.payload == Data(repeatedString.utf8))
         let decodedRoute = try #require(decoded.route)
         #expect(decodedRoute == route)
+    }
+    
+    @Test func v1PacketIgnoresRouteOnEncode() throws {
+        // v1 packets should NOT include route even if route is set on the packet object
+        let route: [Data] = [
+            try #require(Data(hexString: "0102030405060708")),
+            try #require(Data(hexString: "1112131415161718"))
+        ]
+        
+        var packet = BitchatPacket(
+            type: 0x01,
+            senderID: route[0],
+            recipientID: route.last,
+            timestamp: 1_720_000_000_000,
+            payload: Data("v1-no-route".utf8),
+            signature: nil,
+            ttl: 6
+            // version defaults to 1 (v1 packet)
+        )
+        packet.route = route  // route is set but should be ignored for v1
+        
+        let encoded = try #require(BinaryProtocol.encode(packet), "Failed to encode v1 packet")
+        
+        // HAS_ROUTE flag should NOT be set for v1 packets
+        let flagsByte = encoded[BinaryProtocol.Offsets.flags]
+        #expect((flagsByte & BinaryProtocol.Flags.hasRoute) == 0, "v1 packet should not have HAS_ROUTE flag set")
+        
+        // Decoded packet should have no route
+        let decoded = try #require(BinaryProtocol.decode(encoded), "Failed to decode v1 packet")
+        #expect(decoded.version == 1)
+        #expect(decoded.route == nil, "v1 packet should decode with nil route")
+        #expect(decoded.payload == Data("v1-no-route".utf8))
+    }
+    
+    @Test func v2PacketIncludesRouteOnEncode() throws {
+        // v2 packets SHOULD include route when route is set
+        let route: [Data] = [
+            try #require(Data(hexString: "0102030405060708")),
+            try #require(Data(hexString: "1112131415161718"))
+        ]
+        
+        var packet = BitchatPacket(
+            type: 0x01,
+            senderID: route[0],
+            recipientID: route.last,
+            timestamp: 1_720_000_000_000,
+            payload: Data("v2-with-route".utf8),
+            signature: nil,
+            ttl: 6,
+            version: 2
+        )
+        packet.route = route
+        
+        let encoded = try #require(BinaryProtocol.encode(packet), "Failed to encode v2 packet")
+        
+        // HAS_ROUTE flag SHOULD be set for v2 packets with route
+        let flagsByte = encoded[BinaryProtocol.Offsets.flags]
+        #expect((flagsByte & BinaryProtocol.Flags.hasRoute) != 0, "v2 packet should have HAS_ROUTE flag set")
+        
+        // Decoded packet should have route
+        let decoded = try #require(BinaryProtocol.decode(encoded), "Failed to decode v2 packet")
+        #expect(decoded.version == 2)
+        let decodedRoute = try #require(decoded.route, "v2 packet should decode with route")
+        #expect(decodedRoute.count == route.count)
+        #expect(decoded.payload == Data("v2-with-route".utf8))
+    }
+    
+    @Test func v2PacketWithoutRouteDecodesCorrectly() throws {
+        // v2 packet without route should still work
+        let sender = try #require(Data(hexString: "0011223344556677"))
+        let recipient = try #require(Data(hexString: "8899aabbccddeeff"))
+        
+        let packet = BitchatPacket(
+            type: 0x02,
+            senderID: sender,
+            recipientID: recipient,
+            timestamp: 1_750_000_000_000,
+            payload: Data("v2-no-route".utf8),
+            signature: nil,
+            ttl: 5,
+            version: 2
+        )
+        // route is nil by default
+        
+        let encoded = try #require(BinaryProtocol.encode(packet), "Failed to encode v2 packet without route")
+        
+        // HAS_ROUTE flag should NOT be set when no route
+        let flagsByte = encoded[BinaryProtocol.Offsets.flags]
+        #expect((flagsByte & BinaryProtocol.Flags.hasRoute) == 0, "v2 packet without route should not have HAS_ROUTE flag")
+        
+        let decoded = try #require(BinaryProtocol.decode(encoded), "Failed to decode v2 packet without route")
+        #expect(decoded.version == 2)
+        #expect(decoded.route == nil)
+        #expect(decoded.payload == Data("v2-no-route".utf8))
+    }
+    
+    @Test func v1AndV2PayloadLengthDifference() throws {
+        // Verify that payloadLength does NOT include route bytes
+        // by comparing encoded sizes
+        let route: [Data] = [
+            try #require(Data(hexString: "0102030405060708"))
+        ]
+        let payloadData = Data("test-payload".utf8)
+        
+        // v1 packet (route ignored)
+        var v1Packet = BitchatPacket(
+            type: 0x01,
+            senderID: route[0],
+            recipientID: nil,
+            timestamp: 1_720_000_000_000,
+            payload: payloadData,
+            signature: nil,
+            ttl: 6
+            // version defaults to 1
+        )
+        v1Packet.route = route  // will be ignored for v1
+        
+        // v2 packet with same payload but route included
+        var v2Packet = BitchatPacket(
+            type: 0x01,
+            senderID: route[0],
+            recipientID: nil,
+            timestamp: 1_720_000_000_000,
+            payload: payloadData,
+            signature: nil,
+            ttl: 6,
+            version: 2
+        )
+        v2Packet.route = route
+        
+        let v1Encoded = try #require(BinaryProtocol.encode(v1Packet, padding: false))
+        let v2Encoded = try #require(BinaryProtocol.encode(v2Packet, padding: false))
+        
+        // v2 should be larger by: 2 bytes (header length field difference) + 1 byte (route count) + 8 bytes (one hop)
+        // Header: v1=14, v2=16 -> +2 bytes
+        // Route: 1 + 8 = 9 bytes
+        // Total expected difference: 11 bytes
+        let expectedDiff = 2 + 1 + 8  // header diff + route count + one hop
+        #expect(v2Encoded.count - v1Encoded.count == expectedDiff, 
+                "v2 packet should be \(expectedDiff) bytes larger than v1 (actual diff: \(v2Encoded.count - v1Encoded.count))")
     }
     
     // MARK: - Compression Tests
@@ -165,6 +314,34 @@ struct BinaryProtocolTests {
         let encodedData = try #require(BinaryProtocol.encode(packet), "Failed to encode small packet")
         let decodedPacket = try #require(BinaryProtocol.decode(encodedData), "Failed to decode small packet")
         #expect(decodedPacket.payload == smallPayload)
+    }
+
+    @Test("Reject payloads larger than the framed file cap")
+    func oversizedPayloadIsRejected() throws {
+        let targetSize = FileTransferLimits.maxFramedFileBytes + 1
+        var oversized = Data()
+        oversized.reserveCapacity(targetSize)
+        let byteRun = Data((0...255).map { UInt8($0) })
+        while oversized.count < targetSize {
+            let remaining = targetSize - oversized.count
+            if remaining >= byteRun.count {
+                oversized.append(byteRun)
+            } else {
+                oversized.append(byteRun.prefix(remaining))
+            }
+        }
+        let packet = BitchatPacket(
+            type: MessageType.message.rawValue,
+            senderID: Data(hexString: "0011223344556677") ?? Data(),
+            recipientID: nil,
+            timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
+            payload: oversized,
+            signature: nil,
+            ttl: 1,
+            version: 2
+        )
+        let encoded = try #require(BinaryProtocol.encode(packet), "Failed to encode oversized packet")
+        #expect(BinaryProtocol.decode(encoded) == nil)
     }
     
     // MARK: - Message Padding Tests

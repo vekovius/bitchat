@@ -6,7 +6,7 @@ struct CommandProcessorTests {
 
     @MainActor
     @Test func slapNotFoundGrammar() {
-        let processor = CommandProcessor(chatViewModel: nil, meshService: nil, identityManager: identityManager)
+        let processor = CommandProcessor(contextProvider: nil, meshService: nil, identityManager: identityManager)
         let result = processor.process("/slap @system")
         switch result {
         case .error(let message):
@@ -18,7 +18,7 @@ struct CommandProcessorTests {
 
     @MainActor
     @Test func hugNotFoundGrammar() {
-        let processor = CommandProcessor(chatViewModel: nil, meshService: nil, identityManager: identityManager)
+        let processor = CommandProcessor(contextProvider: nil, meshService: nil, identityManager: identityManager)
         let result = processor.process("/hug @system")
         switch result {
         case .error(let message):
@@ -30,7 +30,7 @@ struct CommandProcessorTests {
     
     @MainActor
     @Test func slapUsageMessage() {
-        let processor = CommandProcessor(chatViewModel: nil, meshService: nil, identityManager: identityManager)
+        let processor = CommandProcessor(contextProvider: nil, meshService: nil, identityManager: identityManager)
         let result = processor.process("/slap")
         switch result {
         case .error(let message):

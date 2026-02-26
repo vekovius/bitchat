@@ -426,4 +426,70 @@ struct PeerIDTests {
         #expect(!PeerID(str: "nostr:\(hex65)").isValid)
         #expect(!PeerID(str: "nostr_\(hex65)").isValid)
     }
+
+    // MARK: - File Transfer PeerID Normalization
+    // These tests verify the fix for asymmetric voice/media delivery (BCH-01-XXX)
+    // The bug occurred when selectedPrivateChatPeer was migrated to 64-hex stable key
+    // but the receiver expected SHA256-derived 16-hex format
+
+    @Test func fileTransfer_toShortNormalizesNoiseKeyToFingerprint() {
+        // Given: A 64-hex Noise public key (what selectedPrivateChatPeer becomes after session)
+        let noiseKey = Data(repeating: 0xAB, count: 32)
+        let stableKeyPeerID = PeerID(hexData: noiseKey)  // 64-hex
+
+        // When: Convert to short form (what sendFilePrivate should do)
+        let shortID = stableKeyPeerID.toShort()
+
+        // Then: Should be 16-hex SHA256 fingerprint (matching myPeerID format)
+        let expected = noiseKey.sha256Fingerprint().prefix(16)
+        #expect(shortID.id == String(expected))
+        #expect(shortID.id.count == 16)
+    }
+
+    @Test func fileTransfer_shortIDMatchesMyPeerIDFormat() {
+        // Given: A receiver's myPeerID is SHA256-derived (from refreshPeerIdentity)
+        let noiseKey = Data(repeating: 0xCD, count: 32)
+        let myPeerID = PeerID(publicKey: noiseKey)  // SHA256-derived 16-hex
+
+        // When: Sender uses toShort() on 64-hex stable key
+        let senderStableKey = PeerID(hexData: noiseKey)  // 64-hex
+        let recipientData = Data(hexString: senderStableKey.toShort().id)!
+        let receivedRecipientID = PeerID(hexData: recipientData)
+
+        // Then: Should match receiver's myPeerID (file transfer accepted)
+        #expect(receivedRecipientID == myPeerID)
+    }
+
+    @Test func fileTransfer_truncatedRawKeyDoesNotMatchMyPeerID() {
+        // This test demonstrates the bug we fixed
+        // When 64-hex was truncated to first 8 bytes instead of using SHA256 fingerprint
+
+        // Given: Receiver's myPeerID is SHA256-derived
+        let noiseKey = Data(repeating: 0xEF, count: 32)
+        let myPeerID = PeerID(publicKey: noiseKey)  // SHA256-derived 16-hex
+
+        // When: Truncate raw key (the OLD buggy behavior)
+        let truncatedRaw = noiseKey.prefix(8)  // First 8 bytes of raw key
+        let wrongRecipientID = PeerID(hexData: truncatedRaw)
+
+        // Then: Should NOT match (demonstrates why fix was needed)
+        #expect(wrongRecipientID != myPeerID)
+    }
+
+    @Test func fileTransfer_shortIDProducesCorrect8ByteRoutingData() {
+        // Verify the wire format is correct (8 bytes for BinaryProtocol)
+        let noiseKey = Data(repeating: 0x12, count: 32)
+        let stableKeyPeerID = PeerID(hexData: noiseKey)
+        let shortID = stableKeyPeerID.toShort()
+
+        // routingData should be 8 bytes (16 hex chars -> 8 bytes)
+        let routingData = shortID.routingData
+        #expect(routingData != nil)
+        #expect(routingData?.count == 8)
+
+        // And it should match SHA256 fingerprint first 8 bytes
+        let expectedFingerprint = noiseKey.sha256Fingerprint()
+        let expectedFirst8 = Data(hexString: String(expectedFingerprint.prefix(16)))
+        #expect(routingData == expectedFirst8)
+    }
 }
